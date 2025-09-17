@@ -33,7 +33,120 @@ def load_datasets():
             print(f"   Loaded: {len(df)} {label_name} news samples")
             dataframes.append(df)
         except Exception as e:
-            rnn_classifier = RNNFakeNewsClassifier(
+            raise FileNotFoundError(f"Error loading {file_path}: {str(e)}")
+    
+    if len(dataframes) == 0:
+        raise FileNotFoundError("No dataset files found")
+    
+    combined_df = pd.concat(dataframes, ignore_index=True)
+    
+    # Find text column
+    text_column = None
+    for col in ['text', 'title']:
+        if col in combined_df.columns:
+            text_column = col
+            break
+    
+    if text_column is None:
+        text_columns = combined_df.select_dtypes(include=['object']).columns
+        if len(text_columns) > 0:
+            text_column = text_columns[0]
+    
+    if text_column is None:
+        raise ValueError("No text column found in dataset")
+    
+    print(f"\nDataset Summary:")
+    print(f"Total samples: {len(combined_df)}")
+    print(f"Text column: '{text_column}'")
+    
+    distribution = combined_df['binary_label'].value_counts()
+    for label, count in distribution.items():
+        label_name = "Fake News" if label == 1 else "Real News"
+        percentage = (count / len(combined_df)) * 100
+        print(f"  {label} ({label_name}): {count} ({percentage:.1f}%)")
+    
+    return combined_df, text_column
+
+def create_balanced_dataset(df, text_column, max_samples_per_class=None):
+    """Create a balanced dataset"""
+    print("\nBalancing dataset...")
+    
+    class_counts = df['binary_label'].value_counts()
+    min_samples = class_counts.min()
+    
+    if max_samples_per_class:
+        min_samples = min(max_samples_per_class, min_samples)
+    
+    print(f"Using {min_samples} samples per class...")
+    
+    balanced_dfs = []
+    for label in df['binary_label'].unique():
+        class_df = df[df['binary_label'] == label].sample(n=min_samples, random_state=42)
+        balanced_dfs.append(class_df)
+    
+    balanced_df = pd.concat(balanced_dfs, ignore_index=True)
+    
+    texts = balanced_df[text_column].fillna('').tolist()
+    labels = balanced_df['binary_label'].tolist()
+    
+    print(f"Balanced dataset created: {len(texts)} total samples")
+    balanced_counts = balanced_df['binary_label'].value_counts()
+    for label, count in balanced_counts.items():
+        label_name = "Fake News" if label == 1 else "Real News"
+        print(f"  {label} ({label_name}): {count}")
+    
+    return texts, labels
+
+def split_data(texts, labels, test_size=0.2, val_size=0.1):
+    """Split data into train, validation, and test sets"""
+    print(f"\nSplitting data...")
+    
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        texts, labels, test_size=test_size+val_size, random_state=42, stratify=labels
+    )
+    
+    val_ratio = val_size / (test_size + val_size)
+    X_val, X_test, y_val, y_test = train_test_split(
+        X_temp, y_temp, test_size=1-val_ratio, random_state=42, stratify=y_temp
+    )
+    
+    print(f"Training set: {len(X_train)} samples")
+    print(f"Validation set: {len(X_val)} samples")
+    print(f"Test set: {len(X_test)} samples")
+    
+    return X_train, X_val, X_test, y_train, y_val, y_test
+
+def train_bert_model(X_train, X_val, X_test, y_train, y_val, y_test):
+    """Train BERT model"""
+    print("\n" + "="*50)
+    print("Training BERT Model")
+    print("="*50)
+    
+    bert_classifier = BERTFakeNewsClassifier(model_name='distilbert-base-uncased')
+    bert_classifier.prepare_data(X_train, X_val, X_test, y_train, y_val, y_test)
+    
+    bert_classifier.train(epochs=3, batch_size=16, learning_rate=2e-5)
+    
+    test_loss, test_acc, predictions, true_labels, report, cm = bert_classifier.test_model()
+    
+    print(f"BERT Test Accuracy: {test_acc:.4f}")
+    
+    return bert_classifier, test_acc
+
+def train_rnn_model(X_train, X_val, X_test, y_train, y_val, y_test):
+    """Train RNN model"""
+    print("\n" + "="*50)
+    print("Training RNN Model")
+    print("="*50)
+    
+    # Build vocabulary from training data
+    processed_texts = [preprocess_text(text) for text in X_train]
+    vocab_to_idx, vocab = build_vocabulary(processed_texts, min_freq=3, max_vocab_size=15000)
+    vocab_size = len(vocab)
+    
+    print(f"Vocabulary size: {vocab_size}")
+    
+    rnn_classifier = RNNFakeNewsClassifier(
         vocab_size=vocab_size,
         embed_dim=128,
         hidden_dim=256,
@@ -216,115 +329,4 @@ def main():
     print("- bert_fake_news_model/: BERT model directory")
 
 if __name__ == "__main__":
-    main()aise FileNotFoundError(f"Error loading {file_path}: {str(e)}")
-    
-    if len(dataframes) == 0:
-        raise FileNotFoundError("No dataset files found")
-    
-    combined_df = pd.concat(dataframes, ignore_index=True)
-    
-    # Find text column
-    text_column = None
-    for col in ['text', 'title']:
-        if col in combined_df.columns:
-            text_column = col
-            break
-    
-    if text_column is None:
-        text_columns = combined_df.select_dtypes(include=['object']).columns
-        if len(text_columns) > 0:
-            text_column = text_columns[0]
-    
-    if text_column is None:
-        raise ValueError("No text column found in dataset")
-    
-    print(f"\nDataset Summary:")
-    print(f"Total samples: {len(combined_df)}")
-    print(f"Text column: '{text_column}'")
-    
-    distribution = combined_df['binary_label'].value_counts()
-    for label, count in distribution.items():
-        label_name = "Fake News" if label == 1 else "Real News"
-        percentage = (count / len(combined_df)) * 100
-        print(f"  {label} ({label_name}): {count} ({percentage:.1f}%)")
-    
-    return combined_df, text_column
-
-def create_balanced_dataset(df, text_column, max_samples_per_class=None):
-    """Create a balanced dataset"""
-    print("\nBalancing dataset...")
-    
-    class_counts = df['binary_label'].value_counts()
-    min_samples = class_counts.min()
-    
-    if max_samples_per_class:
-        min_samples = min(max_samples_per_class, min_samples)
-    
-    print(f"Using {min_samples} samples per class...")
-    
-    balanced_dfs = []
-    for label in df['binary_label'].unique():
-        class_df = df[df['binary_label'] == label].sample(n=min_samples, random_state=42)
-        balanced_dfs.append(class_df)
-    
-    balanced_df = pd.concat(balanced_dfs, ignore_index=True)
-    
-    texts = balanced_df[text_column].fillna('').tolist()
-    labels = balanced_df['binary_label'].tolist()
-    
-    print(f"Balanced dataset created: {len(texts)} total samples")
-    balanced_counts = balanced_df['binary_label'].value_counts()
-    for label, count in balanced_counts.items():
-        label_name = "Fake News" if label == 1 else "Real News"
-        print(f"  {label} ({label_name}): {count}")
-    
-    return texts, labels
-
-def split_data(texts, labels, test_size=0.2, val_size=0.1):
-    """Split data into train, validation, and test sets"""
-    print(f"\nSplitting data...")
-    
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        texts, labels, test_size=test_size+val_size, random_state=42, stratify=labels
-    )
-    
-    val_ratio = val_size / (test_size + val_size)
-    X_val, X_test, y_val, y_test = train_test_split(
-        X_temp, y_temp, test_size=1-val_ratio, random_state=42, stratify=y_temp
-    )
-    
-    print(f"Training set: {len(X_train)} samples")
-    print(f"Validation set: {len(X_val)} samples")
-    print(f"Test set: {len(X_test)} samples")
-    
-    return X_train, X_val, X_test, y_train, y_val, y_test
-
-def train_bert_model(X_train, X_val, X_test, y_train, y_val, y_test):
-    """Train BERT model"""
-    print("\n" + "="*50)
-    print("Training BERT Model")
-    print("="*50)
-    
-    bert_classifier = BERTFakeNewsClassifier(model_name='distilbert-base-uncased')
-    bert_classifier.prepare_data(X_train, X_val, X_test, y_train, y_val, y_test)
-    
-    bert_classifier.train(epochs=3, batch_size=16, learning_rate=2e-5)
-    
-    test_loss, test_acc, predictions, true_labels, report, cm = bert_classifier.test_model()
-    
-    print(f"BERT Test Accuracy: {test_acc:.4f}")
-    
-    return bert_classifier, test_acc
-
-def train_rnn_model(X_train, X_val, X_test, y_train, y_val, y_test):
-    """Train RNN model"""
-    print("\n" + "="*50)
-    print("Training RNN Model")
-    print("="*50)
-    
-    # Build vocabulary from training data
-    processed_texts = [preprocess_text(text) for text in X_train]
-    vocab_to_idx, vocab = build_vocabulary(processed_texts, min_freq=3, max_vocab_size=15000)
-    vocab_size = len(vocab)
-    
-    print(f"Vocabulary size: {vocab_size}")
+    main()
