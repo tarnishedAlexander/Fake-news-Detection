@@ -1,2 +1,4 @@
 dataset/
 kaggle.json
+__pycache__
+bert_fake_news_model

@@ -10,8 +10,8 @@ from sklearn.metrics import accuracy_score, classification_report, confusion_mat
 import warnings
 warnings.filterwarnings('ignore')
 
-from bert import BERTFakeNewsClassifier
-from rnn import RNNFakeNewsClassifier, build_vocabulary, preprocess_text
+from utils.bert import BERTFakeNewsClassifier
+from utils.rnn import RNNFakeNewsClassifier, build_vocabulary, preprocess_text
 
 def load_datasets():
     """Load and combine both true and fake news datasets"""
